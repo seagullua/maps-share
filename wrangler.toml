@@ -1,4 +1,4 @@
-name = "maps-share-worker"
+name = "car-map-share"
 main = "src/worker.js"
 compatibility_date = "2024-08-01"
 

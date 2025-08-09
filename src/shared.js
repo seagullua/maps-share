@@ -35,7 +35,7 @@ export async function fetchFollow(startUrl, maxHops = 10, timeoutMs = 10000) {
 
     if (res.status === 200) {
       const text = await res.text();
-      const meta = text.match(/<meta[^>]+http-equiv=["']refresh["'][^>]*content=["'][^"'>\s]+)["']/i);
+      const meta = text.match(/<meta[^>]+http-equiv=["']refresh["'][^>]*content=["'][^"']*url=([^"'>\s]+)["']/i);
       if (meta && meta[1]) {
         const next = decodeHtmlEntities(meta[1]);
         current = new URL(next, current).toString();

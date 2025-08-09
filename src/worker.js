@@ -14,17 +14,6 @@ const PUSHOVER_USER = "CHANGE_ME_PUSHOVER_USER";
 // Google Maps navigate URL. GET supports local testing without push.
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-
-    if (request.method === "GET") {
-      const shareUrl = url.searchParams.get("url") || "";
-      if (!shareUrl) {
-        return json({ ok: true, message: "Pass ?url=... to preview expansion" });
-      }
-      const { resolved, navUrl } = await expandToNavigateUrl(shareUrl);
-      return json({ ok: true, resolvedUrl: resolved, navigateUrl: navUrl });
-    }
-
     if (request.method === "POST") {
       let body;
       try {
