@@ -102,51 +102,91 @@ function addNavigateParam(finalUrl) {
 }
 
 function extractDestinationFromResolved(finalUrl) {
-  // Parse destination from a Google Maps URL. Prefer coordinates when available.
+  // Parse destination from a Google Maps URL. Return best available combination of
+  // { lat, lng, placeId, address } so the caller can prefer GPS but also provide name if possible.
+  const result = { lat: null, lng: null, placeId: null, address: null };
   try {
     const u = new URL(finalUrl);
+
     // Prefer explicit place_id if present
     const destPid = u.searchParams.get("destination_place_id") || u.searchParams.get("query_place_id");
-    if (destPid) return { placeId: destPid };
-    // 1) Explicit destination= in dir URLs
+    if (destPid) result.placeId = destPid;
+
+    // Explicit destination=
     const dest = u.searchParams.get("destination");
     if (dest) {
       const m = dest.match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
-      if (m) return { lat: m[1], lng: m[2] };
-      return { address: dest };
+      if (m) {
+        result.lat = m[1];
+        result.lng = m[2];
+      } else if (!result.address) {
+        result.address = dest;
+      }
     }
 
-    // 2) q= in place/search URLs
+    // q= signals (place_id, coords, or free text)
     const q = u.searchParams.get("q");
     if (q) {
       const pidMatch = q.match(/^\s*place_id:\s*([^,\s]+)/i);
-      if (pidMatch) return { placeId: pidMatch[1] };
+      if (pidMatch) result.placeId = result.placeId || pidMatch[1];
       const locMatch = q.match(/^\s*loc:\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/i);
       const llMatch = q.match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
-      if (locMatch) return { lat: locMatch[1], lng: locMatch[2] };
-      if (llMatch) return { lat: llMatch[1], lng: llMatch[2] };
-      // If q is a free-text address, use it as address
-      if (!/^\s*place_id:/i.test(q)) return { address: q };
+      if (locMatch) {
+        result.lat = result.lat || locMatch[1];
+        result.lng = result.lng || locMatch[2];
+      } else if (llMatch) {
+        result.lat = result.lat || llMatch[1];
+        result.lng = result.lng || llMatch[2];
+      } else if (!/^\s*place_id:/i.test(q) && !result.address) {
+        result.address = q;
+      }
     }
 
-    // 3) @lat,lng,zoom in path
-    const at = finalUrl.match(/@(-?\d+\.\d+),(-?\d+\.\d+),/);
-    if (at) return { lat: at[1], lng: at[2] };
+    // @lat,lng,zoom in path (allow optional whitespace after comma)
+    if (!result.lat || !result.lng) {
+      const at = finalUrl.match(/@(-?\d+\.\d+),\s*(-?\d+\.\d+),/);
+      if (at) {
+        result.lat = result.lat || at[1];
+        result.lng = result.lng || at[2];
+      }
+    }
 
-    // 4) !3dLAT!4dLNG pattern in path
-    const bang = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
-    if (bang) return { lat: bang[1], lng: bang[2] };
+    // !3dLAT!4dLNG pattern in path
+    if (!result.lat || !result.lng) {
+      const bang = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+      if (bang) {
+        result.lat = result.lat || bang[1];
+        result.lng = result.lng || bang[2];
+      }
+    }
 
-    // 5) ll= or sll=
-    const ll = u.searchParams.get("ll") || u.searchParams.get("sll");
-    if (ll) {
-      const m = ll.match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
-      if (m) return { lat: m[1], lng: m[2] };
+    // ll= or sll=
+    if (!result.lat || !result.lng) {
+      const ll = u.searchParams.get("ll") || u.searchParams.get("sll");
+      if (ll) {
+        const m2 = ll.match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
+        if (m2) {
+          result.lat = result.lat || m2[1];
+          result.lng = result.lng || m2[2];
+        }
+      }
+    }
+
+    // Extract readable name from path if available
+    const placePath = u.pathname.match(/\/maps\/place\/([^/]+)/i);
+    if (placePath && placePath[1] && !result.address) {
+      const name = decodeURIComponent(placePath[1]).replace(/\+/g, " ");
+      if (name && name.length > 1) result.address = name;
+    }
+    const searchPath = u.pathname.match(/\/maps\/search\/([^/]+)/i);
+    if (searchPath && searchPath[1] && !result.address) {
+      const name = decodeURIComponent(searchPath[1]).replace(/\+/g, " ");
+      if (name && name.length > 1) result.address = name;
     }
   } catch {
     // ignore parse errors
   }
-  return {};
+  return result;
 }
 
 function detectUrlContext(finalUrl) {
@@ -192,17 +232,40 @@ function buildAndroidPinIntentFromResolved(finalUrl) {
   return null;
 }
 
-function buildGoogleNavigationUrl(finalUrl) {
+function buildDrivingDirUrlFromResolved(finalUrl) {
   const dest = extractDestinationFromResolved(finalUrl);
-  if (dest.placeId) return `google.navigation:q=place_id:${dest.placeId}&mode=d`;
-  if (dest.lat && dest.lng) return `google.navigation:q=${dest.lat},${dest.lng}&mode=d`;
-  if (dest.address) return `google.navigation:q=${encodeURIComponent(dest.address)}&mode=d`;
-  return null;
+  if (!dest.placeId && !dest.lat && !dest.lng && !dest.address) return null;
+  const base = new URL("https://www.google.com/maps/dir/");
+  base.searchParams.set("api", "1");
+  base.searchParams.set("travelmode", "driving");
+  base.searchParams.set("dir_action", "navigate");
+
+  // GPS must be present if available: prefer coordinates in destination
+  if (dest.lat && dest.lng) {
+    base.searchParams.set("destination", `${dest.lat},${dest.lng}`);
+  } else if (dest.placeId) {
+    base.searchParams.set("destination", `place_id:${dest.placeId}`);
+  } else if (dest.address) {
+    base.searchParams.set("destination", dest.address);
+  }
+
+  // If placeId exists, include destination_place_id so Maps shows official name
+  if (dest.placeId) {
+    base.searchParams.set("destination_place_id", dest.placeId);
+  }
+
+  // If we have both coords and a readable name, include a label to help Maps display it.
+  // Some clients respect destination_place_id; the label is a best-effort hint.
+  if (dest.lat && dest.lng && dest.address) {
+    base.searchParams.set("destination_label", dest.address);
+  }
+
+  return base.toString();
 }
 
 async function processOne(input) {
   const resolved = await fetchFollow(input);
-  const navUrl = buildGoogleNavigationUrl(resolved);
+  const navUrl = buildDrivingDirUrlFromResolved(resolved);
   return {
     input,
     resolvedUrl: resolved,
@@ -245,7 +308,11 @@ async function readStdin() {
   for (const u of urls) {
     try {
       const out = await processOne(u);
-      // Print only one URL: Google Maps directions URL that starts navigation; fallback to resolved URL
+      // Show resolved URL for visibility
+      if (out.resolvedUrl) {
+        console.log("Resolved URL:", out.resolvedUrl);
+      }
+      // Then print the final URL to be consumed as intent data (keep unlabeled)
       console.log(out.navUrl || out.resolvedUrl);
     } catch (e) {
       console.error(`Error processing ${u}:`, e.message || e);
