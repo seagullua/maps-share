@@ -1,0 +1,15 @@
+{
+  "name": "maps-share",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:worker": "wrangler dev",
+    "deploy:worker": "wrangler deploy",
+    "fmt": "prettier -w ."
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "wrangler": "^3.60.1"
+  }
+}
