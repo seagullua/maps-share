@@ -6,6 +6,7 @@
   "scripts": {
     "dev:worker": "wrangler dev",
     "deploy:worker": "wrangler deploy",
+    "test:worker": "node bin/test-worker.js",
     "fmt": "prettier -w ."
   },
   "devDependencies": {

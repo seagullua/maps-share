@@ -263,14 +263,11 @@ function buildDrivingDirUrlFromResolved(finalUrl) {
   return base.toString();
 }
 
+import { expandToNavigateUrl } from "./src/shared.js";
+
 async function processOne(input) {
-  const resolved = await fetchFollow(input);
-  const navUrl = buildDrivingDirUrlFromResolved(resolved);
-  return {
-    input,
-    resolvedUrl: resolved,
-    navUrl,
-  };
+  const { resolved, navUrl } = await expandToNavigateUrl(input);
+  return { input, resolvedUrl: resolved, navUrl };
 }
 
 async function readStdin() {

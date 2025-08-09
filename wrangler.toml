@@ -4,13 +4,3 @@ compatibility_date = "2024-08-01"
 
 [vars]
 ENVIRONMENT = "production"
-PUSHOVER_TITLE = "Maps Navigation"
-PUSHOVER_PRIORITY = "0"
-# Optional non-secret defaults; override via env vars or dashboard
-PUSHOVER_SOUND = ""
-PUSHOVER_DEVICE = ""
-
-# Secrets to set via `wrangler secret put` (not stored in repo):
-# - SECRET_API_KEY
-# - PUSHOVER_TOKEN
-# - PUSHOVER_USER
