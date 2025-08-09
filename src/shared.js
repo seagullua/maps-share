@@ -1,6 +1,17 @@
 // Shared expansion utilities used by both the CLI and the Cloudflare Worker
 
 export async function expandToNavigateUrl(inputUrl) {
+  // Handle Apple Maps text or URLs first
+  const apple = extractAppleFromText(String(inputUrl || ""));
+  if (apple) {
+    const navFromApple = buildDirFromParts(apple.parts);
+    return {
+      resolved: apple.resolved,
+      navUrl: navFromApple,
+      debug: { parsed: apple.parts, source: "apple" },
+    };
+  }
+
   const resolved = await fetchFollow(inputUrl);
   const navUrl = buildDirUrl(resolved);
   return {
@@ -8,6 +19,7 @@ export async function expandToNavigateUrl(inputUrl) {
     navUrl,
     debug: {
       parsed: extractDestination(resolved),
+      source: "google",
     },
   };
 }
@@ -170,4 +182,62 @@ export function buildDirUrl(finalUrl) {
   if (dest.placeId) base.searchParams.set("destination_place_id", dest.placeId);
   if (dest.address) base.searchParams.set("destination_label", dest.address);
   return base.toString();
+}
+
+export function buildDirFromParts(parts) {
+  const base = new URL("https://www.google.com/maps/dir/");
+  base.searchParams.set("api", "1");
+  base.searchParams.set("travelmode", "driving");
+  base.searchParams.set("dir_action", "navigate");
+  if (parts.lat && parts.lng) {
+    base.searchParams.set("destination", `${parts.lat},${parts.lng}`);
+  } else if (parts.address) {
+    base.searchParams.set("destination", parts.address);
+  } else if (parts.placeId) {
+    base.searchParams.set("destination", `place_id:${parts.placeId}`);
+  } else {
+    return null;
+  }
+  if (parts.placeId) base.searchParams.set("destination_place_id", parts.placeId);
+  if (parts.address) base.searchParams.set("destination_label", parts.address);
+  return base.toString();
+}
+
+function extractAppleFromText(text) {
+  try {
+    let candidateUrl = null;
+    // If text is a URL, check domain
+    try {
+      const u = new URL(text);
+      if (/^maps\.apple\.com$/i.test(u.hostname)) candidateUrl = u.toString();
+    } catch {}
+    if (!candidateUrl) {
+      const m = String(text).match(/https?:\/\/maps\.apple\.com\/[^\s"']+/i);
+      if (m && m[0]) candidateUrl = m[0];
+    }
+    if (!candidateUrl) return null;
+
+    const u = new URL(candidateUrl);
+    const parts = { lat: null, lng: null, placeId: null, address: null };
+
+    // coordinate=lat,lng or ll=
+    const coord = u.searchParams.get("coordinate") || u.searchParams.get("ll");
+    if (coord) {
+      const m = coord.match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/);
+      if (m) {
+        parts.lat = m[1];
+        parts.lng = m[2];
+      }
+    }
+    // name or q
+    const name = u.searchParams.get("name") || u.searchParams.get("q");
+    if (name) parts.address = decodeURIComponent(name).replace(/\+/g, " ");
+    // address param
+    const address = u.searchParams.get("address");
+    if (!parts.address && address) parts.address = decodeURIComponent(address).replace(/\+/g, " ");
+
+    return { resolved: candidateUrl, parts };
+  } catch {
+    return null;
+  }
 }
