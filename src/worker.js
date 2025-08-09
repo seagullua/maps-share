@@ -11,6 +11,7 @@ export default {
       } catch {
         return json({ ok: false, error: "Invalid JSON" }, 400);
       }
+      console.log("Incoming body:", body);
       const { apiKey, url: shareUrl, device, sound, title, priority } = body || {};
       if (!apiKey || apiKey !== SECRET_API_KEY) {
         return json({ ok: false, error: "Unauthorized" }, 401);
@@ -20,6 +21,7 @@ export default {
       }
 
       const result = await expandAndPush(shareUrl, { title, priority, sound, device });
+      console.log("Result response:", result);
       if (!result.ok) {
         return json(result, 422);
       }
