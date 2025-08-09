@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * Expand Google Maps share URLs (maps.app.goo.gl -> full maps URL) and
- * optionally add the parameter that starts navigation on open.
+ * Expand Google Maps share URLs (maps.app.goo.gl -> full maps URL)
+ * and output a single URL string to be used as Intent data that
+ * starts Google Maps driving navigation immediately. Uses place_id
+ * when available to preserve the place.
  *
  * Requires: Node.js 18+ (uses global fetch)
  */
@@ -99,14 +101,112 @@ function addNavigateParam(finalUrl) {
   }
 }
 
+function extractDestinationFromResolved(finalUrl) {
+  // Parse destination from a Google Maps URL. Prefer coordinates when available.
+  try {
+    const u = new URL(finalUrl);
+    // Prefer explicit place_id if present
+    const destPid = u.searchParams.get("destination_place_id") || u.searchParams.get("query_place_id");
+    if (destPid) return { placeId: destPid };
+    // 1) Explicit destination= in dir URLs
+    const dest = u.searchParams.get("destination");
+    if (dest) {
+      const m = dest.match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
+      if (m) return { lat: m[1], lng: m[2] };
+      return { address: dest };
+    }
+
+    // 2) q= in place/search URLs
+    const q = u.searchParams.get("q");
+    if (q) {
+      const pidMatch = q.match(/^\s*place_id:\s*([^,\s]+)/i);
+      if (pidMatch) return { placeId: pidMatch[1] };
+      const locMatch = q.match(/^\s*loc:\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)/i);
+      const llMatch = q.match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
+      if (locMatch) return { lat: locMatch[1], lng: locMatch[2] };
+      if (llMatch) return { lat: llMatch[1], lng: llMatch[2] };
+      // If q is a free-text address, use it as address
+      if (!/^\s*place_id:/i.test(q)) return { address: q };
+    }
+
+    // 3) @lat,lng,zoom in path
+    const at = finalUrl.match(/@(-?\d+\.\d+),(-?\d+\.\d+),/);
+    if (at) return { lat: at[1], lng: at[2] };
+
+    // 4) !3dLAT!4dLNG pattern in path
+    const bang = finalUrl.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/);
+    if (bang) return { lat: bang[1], lng: bang[2] };
+
+    // 5) ll= or sll=
+    const ll = u.searchParams.get("ll") || u.searchParams.get("sll");
+    if (ll) {
+      const m = ll.match(/^\s*(-?\d+\.\d+)\s*,\s*(-?\d+\.\d+)\s*$/);
+      if (m) return { lat: m[1], lng: m[2] };
+    }
+  } catch {
+    // ignore parse errors
+  }
+  return {};
+}
+
+function detectUrlContext(finalUrl) {
+  try {
+    const u = new URL(finalUrl);
+    const path = u.pathname || "";
+    const search = u.search || "";
+
+    const isDirections = /\/(dir|directions)\b/i.test(path) ||
+      u.searchParams.has("dir_action") ||
+      u.searchParams.has("destination") ||
+      u.searchParams.has("destination_place_id");
+
+    const hasPlaceSignals = /\/place\//i.test(path) ||
+      u.searchParams.has("query_place_id") ||
+      /\bq=place_id:/i.test(search) ||
+      u.searchParams.has("ftid");
+
+    // If q= exists and isn't pure coords, consider it a place/address search
+    const q = u.searchParams.get("q");
+    if (q && !/^\s*(loc:)?-?\d+\.\d+\s*,\s*-?\d+\.\d+\s*$/i.test(q)) {
+      return { isDirections, isPlace: true };
+    }
+
+    return { isDirections, isPlace: hasPlaceSignals };
+  } catch {
+    return { isDirections: false, isPlace: false };
+  }
+}
+
+function buildAndroidPinIntentFromResolved(finalUrl) {
+  const dest = extractDestinationFromResolved(finalUrl);
+  // Prefer coordinates; fall back to address
+  if (dest.lat && dest.lng) return `geo:0,0?q=${dest.lat},${dest.lng}`;
+  if (dest.address) return `geo:0,0?q=${encodeURIComponent(dest.address)}`;
+  // Also try place_id if present in q=
+  try {
+    const u = new URL(finalUrl);
+    const q = u.searchParams.get("q");
+    const pid = q && q.match(/^\s*place_id:\s*([^,\s]+)/i);
+    if (pid) return `geo:0,0?q=place_id:${pid[1]}`;
+  } catch {}
+  return null;
+}
+
+function buildGoogleNavigationUrl(finalUrl) {
+  const dest = extractDestinationFromResolved(finalUrl);
+  if (dest.placeId) return `google.navigation:q=place_id:${dest.placeId}&mode=d`;
+  if (dest.lat && dest.lng) return `google.navigation:q=${dest.lat},${dest.lng}&mode=d`;
+  if (dest.address) return `google.navigation:q=${encodeURIComponent(dest.address)}&mode=d`;
+  return null;
+}
+
 async function processOne(input) {
   const resolved = await fetchFollow(input);
-  const resolvedNavigate = addNavigateParam(resolved);
-
+  const navUrl = buildGoogleNavigationUrl(resolved);
   return {
     input,
     resolvedUrl: resolved,
-    resolvedUrlNavigate: resolvedNavigate || null,
+    navUrl,
   };
 }
 
@@ -145,13 +245,8 @@ async function readStdin() {
   for (const u of urls) {
     try {
       const out = await processOne(u);
-      console.log("Input:         ", out.input);
-      console.log("Resolved URL:  ", out.resolvedUrl);
-      console.log(
-        "Resolved URL (navigate):",
-        out.resolvedUrlNavigate || "(navigation param not applicable)"
-      );
-      console.log("-".repeat(60));
+      // Print only one URL: Google Maps directions URL that starts navigation; fallback to resolved URL
+      console.log(out.navUrl || out.resolvedUrl);
     } catch (e) {
       console.error(`Error processing ${u}:`, e.message || e);
     }
