@@ -2,7 +2,7 @@
 export const SECRET_API_KEY = "djkdf3498";
 const PUSHOVER_TOKEN = "aw7uo6ao9ghayk565s1hzdnnp9iis7";
 const PUSHOVER_USER = "utjhv2xo4542mumsbsu8pe6zoa7bz7";
-const DEFAULT_TITLE = "TEST";
+const DEFAULT_TITLE = "NAV";
 const DEFAULT_PRIORITY = "0";
 const DEFAULT_SOUND = "";
 const DEFAULT_DEVICE = "HyundaiSantaFe";
@@ -17,7 +17,7 @@ export async function expandAndPush(shareUrl, options = {}) {
   }
 
   const pushRes = await pushPushover({
-    message: "TEST_NAVIGATION",
+    message: "NAV_NAVIGATION",
     url: navUrl,
     title: title || DEFAULT_TITLE,
     priority: (priority ?? DEFAULT_PRIORITY).toString(),
