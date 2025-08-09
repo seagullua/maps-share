@@ -11,9 +11,9 @@ import { expandToNavigateUrl } from "./shared.js";
 
 export async function expandAndPush(shareUrl, options = {}) {
   const { title, priority, sound, device } = options;
-  const { resolved, navUrl } = await expandToNavigateUrl(shareUrl);
+  const { resolved, navUrl, debug } = await expandToNavigateUrl(shareUrl);
   if (!navUrl) {
-    return { ok: false, error: "Could not build navigation URL", resolvedUrl: resolved };
+    return { ok: false, error: "Could not build navigation URL", resolvedUrl: resolved, debug };
   }
 
   const pushRes = await pushPushover({
@@ -25,7 +25,7 @@ export async function expandAndPush(shareUrl, options = {}) {
     device: device ?? DEFAULT_DEVICE,
   });
 
-  return { ok: true, resolvedUrl: resolved, navigateUrl: navUrl, pushover: pushRes };
+  return { ok: true, resolvedUrl: resolved, navigateUrl: navUrl, debug, pushover: pushRes };
 }
 
 async function pushPushover({ message, url, title, priority, sound, device }) {

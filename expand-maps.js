@@ -266,8 +266,8 @@ function buildDrivingDirUrlFromResolved(finalUrl) {
 import { expandToNavigateUrl } from "./src/shared.js";
 
 async function processOne(input) {
-  const { resolved, navUrl } = await expandToNavigateUrl(input);
-  return { input, resolvedUrl: resolved, navUrl };
+  const { resolved, navUrl, debug } = await expandToNavigateUrl(input);
+  return { input, resolvedUrl: resolved, navUrl, debug };
 }
 
 async function readStdin() {
@@ -309,8 +309,39 @@ async function readStdin() {
       if (out.resolvedUrl) {
         console.log("Resolved URL:", out.resolvedUrl);
       }
-      // Then print the final URL to be consumed as intent data (keep unlabeled)
-      console.log(out.navUrl || out.resolvedUrl);
+      console.log("Parsed:", JSON.stringify(out.debug?.parsed ?? null));
+      // Then print the final URL to be consumed as intent data (also echo raw on last line)
+      let finalUrl = out.navUrl || null;
+      if (!finalUrl) {
+        const p = out.debug?.parsed || {};
+        if (p.lat && p.lng) {
+          const u2 = new URL("https://www.google.com/maps/dir/");
+          u2.searchParams.set("api", "1");
+          u2.searchParams.set("travelmode", "driving");
+          u2.searchParams.set("dir_action", "navigate");
+          u2.searchParams.set("destination", `${p.lat},${p.lng}`);
+          if (p.placeId) u2.searchParams.set("destination_place_id", p.placeId);
+          if (p.address) u2.searchParams.set("destination_label", p.address);
+          finalUrl = u2.toString();
+          console.log("Final URL (fallback from coords):", finalUrl);
+        } else if (p.address || p.placeId) {
+          const u2 = new URL("https://www.google.com/maps/dir/");
+          u2.searchParams.set("api", "1");
+          u2.searchParams.set("travelmode", "driving");
+          u2.searchParams.set("dir_action", "navigate");
+          u2.searchParams.set("destination", p.address ? String(p.address) : `place_id:${p.placeId}`);
+          if (p.placeId) u2.searchParams.set("destination_place_id", p.placeId);
+          finalUrl = u2.toString();
+          console.log("Final URL (fallback from address):", finalUrl);
+        } else {
+          console.log("Final URL:", "(unavailable; using resolved URL)");
+          finalUrl = out.resolvedUrl;
+        }
+      } else {
+        console.log("Final URL:", finalUrl);
+      }
+      // Echo raw last line for piping
+      console.log(finalUrl);
     } catch (e) {
       console.error(`Error processing ${u}:`, e.message || e);
     }

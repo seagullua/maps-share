@@ -3,7 +3,13 @@
 export async function expandToNavigateUrl(inputUrl) {
   const resolved = await fetchFollow(inputUrl);
   const navUrl = buildDirUrl(resolved);
-  return { resolved, navUrl };
+  return {
+    resolved,
+    navUrl,
+    debug: {
+      parsed: extractDestination(resolved),
+    },
+  };
 }
 
 export async function fetchFollow(startUrl, maxHops = 10, timeoutMs = 10000) {
@@ -46,7 +52,8 @@ export async function fetchFollow(startUrl, maxHops = 10, timeoutMs = 10000) {
         current = decodeURIComponent(linkParam[1]);
         continue;
       }
-      const direct = text.match(/https?:\/\/(?:www\.)?google\.[^\/"' ]+\/maps[^"' <]+/i);
+      // Try to capture full google maps URLs; allow parentheses and commas
+      const direct = text.match(/https?:\/\/(?:www\.)?google\.[^\s"']+\/maps[^"' <]+/i);
       if (direct && direct[0]) {
         current = direct[0];
       }
@@ -98,7 +105,8 @@ export function extractDestination(finalUrl) {
         result.lat = result.lat || llMatch[1];
         result.lng = result.lng || llMatch[2];
       } else if (!/^\s*place_id:/i.test(q)) {
-        result.address = result.address || q;
+        // decode '+' as spaces for readability
+        result.address = result.address || q.replace(/\+/g, " ");
       }
     }
 
@@ -143,12 +151,22 @@ export function extractDestination(finalUrl) {
 
 export function buildDirUrl(finalUrl) {
   const dest = extractDestination(finalUrl);
-  if (!dest.lat || !dest.lng) return null;
   const base = new URL("https://www.google.com/maps/dir/");
   base.searchParams.set("api", "1");
   base.searchParams.set("travelmode", "driving");
   base.searchParams.set("dir_action", "navigate");
-  base.searchParams.set("destination", `${dest.lat},${dest.lng}`);
+
+  if (dest.lat && dest.lng) {
+    base.searchParams.set("destination", `${dest.lat},${dest.lng}`);
+  } else if (dest.address) {
+    base.searchParams.set("destination", dest.address);
+  } else if (dest.placeId) {
+    // As last resort, use place_id as destination
+    base.searchParams.set("destination", `place_id:${dest.placeId}`);
+  } else {
+    return null;
+  }
+
   if (dest.placeId) base.searchParams.set("destination_place_id", dest.placeId);
   if (dest.address) base.searchParams.set("destination_label", dest.address);
   return base.toString();
